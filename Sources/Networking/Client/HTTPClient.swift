@@ -25,19 +25,22 @@ public final class HTTPClient: Sendable {
         public var cacheableMethods: Set<HTTPMethod>
         /// Maximum number of automatic retries driven by `RequestInterceptorProtocol.retry`.
         public var maxRetries: Int
+        public var showLogs: Bool
 
         public init(
             decoder: ResponseDecoderProtocol = JSONDecoder(),
             cache: CacheStorable = ResponseCache(),
             interceptors: [RequestInterceptorProtocol] = [],
             cacheableMethods: Set<HTTPMethod> = [.get],
-            maxRetries: Int = 3
+            maxRetries: Int = 3,
+            showLogs: Bool = false
         ) {
             self.decoder = decoder
             self.cache = cache
             self.interceptors = interceptors
             self.cacheableMethods = cacheableMethods
             self.maxRetries = maxRetries
+            self.showLogs = showLogs
         }
 
         public static var `default`: Configuration { .init() }
@@ -97,11 +100,14 @@ public final class HTTPClient: Sendable {
 
         do {
             let (data, response) = try await perform(adaptedRequest)
-
+            
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw NetworkError.invalidResponse
             }
-
+            if configuration.showLogs {
+                processRequestForLogs(request: adaptedRequest, response: httpResponse, data: data)
+            }
+            
             try validate(httpResponse, data: data)
 
             // Store successful cacheable responses.
@@ -225,6 +231,61 @@ public final class HTTPClient: Sendable {
         case 403: throw NetworkError.forbidden
         case 404: throw NetworkError.notFound
         default:  throw NetworkError.serverError(statusCode: response.statusCode, data: data)
+        }
+    }
+    
+    private func processRequestForLogs(request: URLRequest, response: HTTPURLResponse, data: Data) {
+        var logProps = [String: Any]()
+        
+        if let header = request.allHTTPHeaderFields {
+            logProps["Headers"] = header
+        }
+        if let method = request.httpMethod, let aURL = request.url?.absoluteString {
+            logProps["aURL"] =  "\(method): \(aURL)"
+        }
+        logProps["Status"] =  "\(response.statusCode)"
+        if let responseBody = data.isEmpty ? nil : JSON(data).dictionaryObject {
+            logProps["ResponseBody"] = responseBody
+        }
+        let log = JSON(logProps)
+        printLog(log, filename: #file, line: #line, column: #column, funcName: #function)
+    }
+    
+    private func printLog(_ object: Any?, filename: String, line: Int, column: Int, funcName: String) {
+        guard configuration.showLogs, let object else { return }
+        let file = URL(fileURLWithPath: filename).lastPathComponent
+        let printString = "\(currentDate()) \("[🛜]")[\(file)]:\(line) \(column) \(funcName) -> \(String(describing: object))"
+        print(printString)
+    }
+    
+    private static var dateFormat = "yyyy-MM-dd hh:mm:ss.SSS"
+    private var dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = dateFormat
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
+    private func currentDate() -> String {
+        dateFormatter.string(from: Date())
+    }
+}
+
+fileprivate extension Data {
+    
+    func jsonString() -> String? {
+        do {
+            let json = try JSONSerialization.jsonObject(with: self, options: [])
+            let data = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
+            guard let jsonString = String(data: data, encoding: .utf8) else {
+                print("Inavlid data")
+                return nil
+            }
+            return jsonString
+        } catch {
+            print("Error: \(error.localizedDescription)")
+            return nil
         }
     }
 }

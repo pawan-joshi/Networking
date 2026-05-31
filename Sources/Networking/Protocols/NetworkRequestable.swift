@@ -57,11 +57,10 @@ public extension NetworkRequestable {
         )
 
         headers?.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-
+        if request.value(forHTTPHeaderField: "Content-Type") == nil {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         if let body {
-            if request.value(forHTTPHeaderField: "Content-Type") == nil {
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            }
             request.httpBody = try body.toData()
         }
 
