@@ -36,17 +36,30 @@ public final class ResponseCache: CacheStorable, @unchecked Sendable {
     ///   - memoryCapacity: In-process byte budget (default 20 MB).
     ///   - diskCapacity: On-disk byte budget (default 150 MB).
     ///   - defaultMaxAge: Fallback TTL in seconds when the server sends no cache headers (default 5 min).
+    ///   - diskPath: Override the on-disk subdirectory name. Leave `nil` to use the
+    ///     default, which is scoped to the host app's bundle identifier so that
+    ///     multiple apps using this library don't share the same cache directory.
     public init(
         memoryCapacity: Int = 20_000_000,
         diskCapacity: Int = 150_000_000,
-        defaultMaxAge: TimeInterval = 300
+        defaultMaxAge: TimeInterval = 300,
+        diskPath: String? = nil
     ) {
+        let resolvedPath = diskPath ?? Self.defaultDiskPath
         self.urlCache = URLCache(
             memoryCapacity: memoryCapacity,
             diskCapacity: diskCapacity,
-            diskPath: "com.networklayer.cache"
+            diskPath: resolvedPath
         )
         self.defaultMaxAge = defaultMaxAge
+    }
+
+    /// Disk subdirectory scoped to the host app's bundle identifier.
+    /// Falls back to a fixed name when no bundle identifier is present
+    /// (e.g. in Swift Package Manager unit-test runners).
+    private static var defaultDiskPath: String {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.networklayer"
+        return "\(bundleID).networklayer.cache"
     }
 
     // MARK: - CacheStorable

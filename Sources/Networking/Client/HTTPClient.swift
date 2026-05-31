@@ -258,17 +258,16 @@ public final class HTTPClient: Sendable {
         print(printString)
     }
     
-    private static var dateFormat = "yyyy-MM-dd hh:mm:ss.SSS"
-    private var dateFormatter: DateFormatter = {
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = dateFormat
+        formatter.dateFormat = "yyyy-MM-dd hh:mm:ss.SSS"
         formatter.locale = Locale.current
         formatter.timeZone = TimeZone.current
         return formatter
     }()
 
     private func currentDate() -> String {
-        dateFormatter.string(from: Date())
+        Self.dateFormatter.string(from: Date())
     }
 }
 
@@ -370,16 +369,21 @@ extension HTTPClient: UploadProtocol {
         let data: Data
 
         if multipart.hasFileParts {
-            // Stream the assembled body to a temp file in chunks so the full multipart
-            // payload is never held in RAM. The file persists for all retry attempts
-            // and is removed once execute returns (success or exhausted retries).
+            // Stream the assembled body to a temp file so the full multipart payload is
+            // never held in RAM. The file must outlive all retry attempts, so cleanup
+            // happens explicitly after execute returns (success or exhausted retries).
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
             try multipart.encode(to: tempURL)
-            defer { try? FileManager.default.removeItem(at: tempURL) }
-            (data, _) = try await execute(urlRequest) { [session] adaptedRequest in
-                let delegate = TaskProgressDelegate(uploadProgress: progressHandler)
-                return try await session.upload(for: adaptedRequest, fromFile: tempURL, delegate: delegate)
+            do {
+                (data, _) = try await execute(urlRequest) { [session] adaptedRequest in
+                    let delegate = TaskProgressDelegate(uploadProgress: progressHandler)
+                    return try await session.upload(for: adaptedRequest, fromFile: tempURL, delegate: delegate)
+                }
+                try? FileManager.default.removeItem(at: tempURL)
+            } catch {
+                try? FileManager.default.removeItem(at: tempURL)
+                throw error
             }
         } else {
             let body = try multipart.encode()

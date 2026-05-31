@@ -446,7 +446,7 @@ final class InterceptorTests: XCTestCase {
             return (response, data)
         }
 
-        let retrier = RetryInterceptor(maxRetries: 3, delay: 0)
+        let retrier = RetryInterceptor(delay: 0)
         let client = HTTPClient(
             session: session,
             configuration: .init(cache: NullCache(), interceptors: [retrier], maxRetries: 3)
@@ -460,7 +460,7 @@ final class InterceptorTests: XCTestCase {
     func test_retryInterceptor_stopsAfterMaxRetries() async throws {
         MockURLProtocol.requestHandler = { _ in throw URLError(.timedOut) }
 
-        let retrier = RetryInterceptor(maxRetries: 2, delay: 0)
+        let retrier = RetryInterceptor(delay: 0)
         let client = HTTPClient(
             session: session,
             configuration: .init(cache: NullCache(), interceptors: [retrier], maxRetries: 2)
@@ -668,6 +668,45 @@ final class MultipartFormDataTests: XCTestCase {
     func test_contentType_includesBoundary() {
         let multipart = MultipartFormData(parts: [], boundary: "MY_BOUNDARY")
         XCTAssertEqual(multipart.contentType, "multipart/form-data; boundary=MY_BOUNDARY")
+    }
+
+    func test_headerString_escapesQuotesAndBackslashesInFileName() throws {
+        // A fileName containing a double-quote and a backslash must be escaped
+        // so the Content-Disposition header remains well-formed (RFC 2183).
+        // Use ASCII body bytes so the full multipart output is UTF-8 decodable.
+        let part = FormDataPart(
+            name: "file",
+            fileName: "my\"evil\\.jpg",
+            mimeType: "image/jpeg",
+            data: Data("body".utf8)
+        )
+        let body = try MultipartFormData(parts: [part], boundary: "B").encode()
+        let bodyString = String(data: body, encoding: .utf8) ?? ""
+
+        // After escaping: backslash → \\ and quote → \", so my"evil\.jpg becomes my\"evil\\.jpg
+        // In a Swift string literal that is: "my\\\"evil\\\\.jpg"
+        XCTAssertTrue(bodyString.contains("filename=\"my\\\"evil\\\\.jpg\""),
+                      "fileName must have quotes and backslashes escaped; got: \(bodyString.debugDescription)")
+        // The raw unescaped quote must not appear as a bare character inside the value.
+        XCTAssertFalse(bodyString.contains("filename=\"my\""),
+                       "Unescaped quote must not appear in Content-Disposition")
+    }
+
+    func test_headerString_stripsNewlinesFromFileName() throws {
+        // CR/LF in a fileName would allow injecting extra MIME headers.
+        let part = FormDataPart(
+            name: "file",
+            fileName: "evil\r\nX-Injected: hdr\r\n.jpg",
+            mimeType: "image/jpeg",
+            data: Data("body".utf8)
+        )
+        let body = try MultipartFormData(parts: [part], boundary: "B").encode()
+        let bodyString = String(data: body, encoding: .utf8) ?? ""
+
+        // The injected text may still appear inside the quoted filename value, but
+        // must not appear as a standalone header line (i.e. preceded by CRLF).
+        XCTAssertFalse(bodyString.contains("\r\nX-Injected"),
+                       "Header injection via fileName must be prevented")
     }
 
     func test_fieldFactory_createsTextPart() throws {

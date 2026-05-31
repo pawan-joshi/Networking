@@ -1,17 +1,24 @@
 import Foundation
 
-/// Retries up to `maxRetries` times with an optional fixed delay.
+/// Votes to retry requests that fail with a transient error, using a fixed delay.
+///
+/// This interceptor decides **whether** an error is worth retrying — it does not
+/// control the retry budget. The maximum number of attempts is configured once on
+/// `HTTPClient.Configuration.maxRetries`, which is the single source of truth for
+/// the retry count. Keeping the count out of this interceptor prevents the silent
+/// `min(interceptor.maxRetries, config.maxRetries)` confusion that arises when both
+/// sides set independent limits.
 public struct RetryInterceptor: RequestInterceptorProtocol {
-    private let maxRetries: Int
     private let delay: TimeInterval
     private let retryableStatusCodes: Set<Int>
 
+    /// - Parameters:
+    ///   - delay: Fixed delay in seconds before each retry attempt.
+    ///   - retryableStatusCodes: HTTP status codes that should trigger a retry.
     public init(
-        maxRetries: Int = 3,
         delay: TimeInterval = 1.0,
         retryableStatusCodes: Set<Int> = [408, 429, 500, 502, 503, 504]
     ) {
-        self.maxRetries = maxRetries
         self.delay = delay
         self.retryableStatusCodes = retryableStatusCodes
     }
@@ -21,8 +28,6 @@ public struct RetryInterceptor: RequestInterceptorProtocol {
         dueTo error: NetworkError,
         currentRetryCount: Int
     ) async -> RetryDecision {
-        guard currentRetryCount < maxRetries else { return .doNotRetry }
-
         switch error {
         case .timeout, .noInternetConnection:
             return .retryWithDelay(delay)

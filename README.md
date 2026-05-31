@@ -179,11 +179,17 @@ func makeAuthenticatedClient() -> HTTPClient {
     HTTPClient(
         configuration: .init(
             decoder: JSONDecoder(),
+            // Disk path is automatically scoped to the host app's bundle identifier,
+            // so two apps sharing this library never collide on disk.
             cache: ResponseCache(defaultMaxAge: 60),
             interceptors: [
                 AuthTokenInterceptor(tokenProvider: appTokenProvider),
-                RetryInterceptor(maxRetries: 2, delay: 0.5),
-            ]
+                // RetryInterceptor decides *which* errors are worth retrying.
+                // The retry budget (how many times) is controlled by maxRetries below —
+                // keeping the count in one place avoids silent min(a, b) surprises.
+                RetryInterceptor(delay: 0.5),
+            ],
+            maxRetries: 2
         )
     )
 }
@@ -217,8 +223,10 @@ func performLogout() async throws {
     try await appTokenProvider.clear()
 }
 
-func isUserSignedIn() async -> Bool {
-    await appTokenProvider.hasToken()
+// hasToken() is throwing so a Keychain failure (e.g. device locked) is
+// surfaced rather than silently treated as "not signed in".
+func isUserSignedIn() async throws -> Bool {
+    try await appTokenProvider.hasToken()
 }
 ```
 
@@ -278,7 +286,7 @@ final class AuthServiceTests: XCTestCase {
         let service  = AuthService(client: client, tokenProvider: provider)
 
         _ = try await service.login(email: "a", password: "b")
-        let stored = await provider.hasToken()
+        let stored = try await provider.hasToken()
         XCTAssertTrue(stored)
     }
 }

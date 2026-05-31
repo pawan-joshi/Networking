@@ -19,5 +19,7 @@ public protocol TokenProvider: Sendable {
     func clear() async throws
 
     /// `true` when a token is currently stored.
-    func hasToken() async -> Bool
+    /// Throws when the underlying storage cannot be read (e.g. Keychain locked),
+    /// so callers can distinguish "not authenticated" from "storage unavailable".
+    func hasToken() async throws -> Bool
 }

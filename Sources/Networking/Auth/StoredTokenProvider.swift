@@ -55,8 +55,8 @@ public actor StoredTokenProvider: TokenProvider {
         }
     }
 
-    public func hasToken() async -> Bool {
-        (try? load()) != nil
+    public func hasToken() async throws -> Bool {
+        try load() != nil
     }
 
     // MARK: - Private

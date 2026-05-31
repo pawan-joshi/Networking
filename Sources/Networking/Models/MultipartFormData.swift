@@ -199,11 +199,24 @@ public struct MultipartFormData: Sendable {
     // MARK: - Private Helpers
 
     private func headerString(for part: FormDataPart) -> String {
-        var disposition = "Content-Disposition: form-data; name=\"\(part.name)\""
+        var disposition = "Content-Disposition: form-data; name=\"\(quotedString(part.name))\""
         if let fileName = part.fileName {
-            disposition += "; filename=\"\(fileName)\""
+            disposition += "; filename=\"\(quotedString(fileName))\""
         }
         return "\(disposition)\r\nContent-Type: \(part.mimeType)\r\n"
+    }
+
+    /// Escapes a value for use inside a quoted-string in a MIME header (RFC 2183).
+    ///
+    /// - Strips bare CR and LF to prevent header injection.
+    /// - Escapes backslashes and double-quotes per the quoted-pair rule so the
+    ///   resulting value can be safely wrapped in `"…"` without breaking the header.
+    private func quotedString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
 

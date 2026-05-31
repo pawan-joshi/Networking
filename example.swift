@@ -149,11 +149,16 @@ func makeAuthenticatedClient() -> HTTPClient {
     HTTPClient(
         configuration: .init(
             decoder: JSONDecoder(),
+            // Disk path is automatically scoped to the host app's bundle identifier,
+            // so two apps sharing this library never collide on disk.
             cache: ResponseCache(defaultMaxAge: 60),
             interceptors: [
                 AuthTokenInterceptor(tokenProvider: appTokenProvider),
-                RetryInterceptor(maxRetries: 2, delay: 0.5),
-            ]
+                // maxRetries is set once on Configuration — not on the interceptor.
+                // RetryInterceptor only decides *which* errors are worth retrying.
+                RetryInterceptor(delay: 0.5),
+            ],
+            maxRetries: 2
         )
     )
 }
@@ -195,8 +200,11 @@ func performLogout() async throws {
 
 /// Quick helper for splash screens that need to know whether to route the user
 /// to the login flow or straight into the app.
-func isUserSignedIn() async -> Bool {
-    await appTokenProvider.hasToken()
+///
+/// `hasToken()` is throwing so that a Keychain failure (e.g. device locked) is
+/// surfaced rather than silently treated as "not signed in".
+func isUserSignedIn() async throws -> Bool {
+    try await appTokenProvider.hasToken()
 }
 
 // MARK: - 7. Error Handling Example
