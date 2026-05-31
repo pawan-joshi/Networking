@@ -255,7 +255,9 @@ public final class HTTPClient: Sendable {
         guard configuration.showLogs, let object else { return }
         let file = URL(fileURLWithPath: filename).lastPathComponent
         let printString = "\(currentDate()) \("[🛜]")[\(file)]:\(line) \(column) \(funcName) -> \(String(describing: object))"
+#if DEBUG
         print(printString)
+#endif
     }
     
     private static let dateFormatter: DateFormatter = {
