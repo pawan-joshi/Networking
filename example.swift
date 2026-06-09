@@ -207,7 +207,39 @@ func isUserSignedIn() async throws -> Bool {
     try await appTokenProvider.hasToken()
 }
 
-// MARK: - 7. Error Handling Example
+// MARK: - 7. Force-Skip Cache (Option A)
+
+/// Demonstrates how to bypass the `HTTPClient` response cache for a specific
+/// endpoint by overriding `cachePolicy` on the `NetworkRequestable` conformance.
+///
+/// Use this when you always need a fresh server response — for example, a
+/// "Pull-to-Refresh" triggered fetch of the current user's profile.
+///
+/// `cachePolicy` defaults to `.useProtocolCachePolicy` in the protocol extension.
+/// Overriding it with `.reloadIgnoringLocalCacheData` tells both `HTTPClient`'s
+/// own `ResponseCache` and the underlying `URLCache` to skip any stored entry
+/// and go straight to the network.
+enum FreshAuthEndpoint: NetworkRequestable {
+    case currentUser
+
+    var baseURL: URL { URL(string: "https://api.repcard.com")! }
+    var path: String { "/v1/users/me" }
+    var method: HTTPMethod { .get }
+
+    /// Skip the cache — always fetch a fresh response from the server.
+    var cachePolicy: URLRequest.CachePolicy { .reloadIgnoringLocalCacheData }
+}
+
+/// Fetches the current user's profile, bypassing any cached response.
+/// Call this after the user performs a pull-to-refresh or completes a
+/// profile-edit flow where stale data would be confusing.
+@MainActor
+func fetchCurrentUserFresh() async throws -> AuthenticatedUser {
+    let client = makeAuthenticatedClient()
+    return try await client.sendUnwrapped(FreshAuthEndpoint.currentUser)
+}
+
+// MARK: - 8. Error Handling Example
 
 /// Demonstrates the typed error surface — callers can react to specific failures
 /// without inspecting strings or status codes.

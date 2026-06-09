@@ -89,15 +89,17 @@ public final class HTTPClient: Sendable {
         perform: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse)
     ) async throws -> (data: Data, response: HTTPURLResponse) {
         let adaptedRequest = try await applyAdaptors(to: urlRequest)
-
-        // Cache look-up for cacheable methods.
-        if let method = HTTPMethod(rawValue: adaptedRequest.httpMethod ?? ""),
+        
+        // Cache look-up for cacheable methods — honour the request's `cachePolicy`
+        // (otherwise reload-ignoring requests would still be served from this application-level cache).
+        if Self.cachePolicyAllowsReadingCache(adaptedRequest.cachePolicy),
+           let method = HTTPMethod(rawValue: adaptedRequest.httpMethod ?? ""),
            configuration.cacheableMethods.contains(method),
            let cached = configuration.cache.cachedResponse(for: adaptedRequest),
            let httpResponse = cached.response as? HTTPURLResponse {
             return (cached.data, httpResponse)
         }
-
+        
         do {
             let (data, response) = try await perform(adaptedRequest)
             
@@ -109,16 +111,18 @@ public final class HTTPClient: Sendable {
             }
             
             try validate(httpResponse, data: data)
-
-            // Store successful cacheable responses.
-            if let method = HTTPMethod(rawValue: adaptedRequest.httpMethod ?? ""),
+            
+            // Store successful cacheable responses — but not when the request opted
+            // out of caching via its `cachePolicy`.
+            if Self.cachePolicyAllowsWritingCache(adaptedRequest.cachePolicy),
+               let method = HTTPMethod(rawValue: adaptedRequest.httpMethod ?? ""),
                configuration.cacheableMethods.contains(method) {
                 let entry = CachedURLResponse(response: httpResponse, data: data)
                 configuration.cache.storeCachedResponse(entry, for: adaptedRequest)
             }
-
+            
             return (data, httpResponse)
-
+            
         } catch {
             let networkError = NetworkError.map(error)
             return try await handleRetry(
@@ -138,6 +142,35 @@ public final class HTTPClient: Sendable {
         try await execute(urlRequest, retryCount: retryCount) { [session] request in
             try await session.data(for: request)
         }
+    }
+
+    // MARK: - Cache Policy
+
+    /// Whether the application-level response cache may *serve* a stored response
+    /// for a request with the given policy. Mirrors `URLSession`'s local-cache
+    /// semantics so `cachePolicy` behaves consistently across both cache layers.
+    private static func cachePolicyAllowsReadingCache(_ policy: URLRequest.CachePolicy) -> Bool {
+        switch policy {
+        case .reloadIgnoringLocalCacheData,
+             .reloadIgnoringLocalAndRemoteCacheData,
+             .reloadRevalidatingCacheData:
+            // These all force a trip to the origin server.
+            return false
+        case .useProtocolCachePolicy,
+             .returnCacheDataElseLoad,
+             .returnCacheDataDontLoad:
+            return true
+        @unknown default:
+            return true
+        }
+    }
+
+    /// Whether a successful response for a request with the given policy may be
+    /// *written* to the application-level response cache.
+    private static func cachePolicyAllowsWritingCache(_ policy: URLRequest.CachePolicy) -> Bool {
+        // `reloadIgnoringLocalAndRemoteCacheData` explicitly bypasses all caches,
+        // so a freshly fetched response must not repopulate the store.
+        policy != .reloadIgnoringLocalAndRemoteCacheData
     }
 
     // MARK: - Retry
@@ -255,9 +288,9 @@ public final class HTTPClient: Sendable {
         guard configuration.showLogs, let object else { return }
         let file = URL(fileURLWithPath: filename).lastPathComponent
         let printString = "\(currentDate()) \("[🛜]")[\(file)]:\(line) \(column) \(funcName) -> \(String(describing: object))"
-#if DEBUG
+        #if DEBUG
         print(printString)
-#endif
+        #endif
     }
     
     private static let dateFormatter: DateFormatter = {
