@@ -6,7 +6,6 @@ public enum NetworkError: Error, LocalizedError, Equatable, Sendable {
     case noData
     case decodingFailed(any Error)
     case encodingFailed(any Error)
-    /// A non-2xx HTTP status code was returned. `data` carries the raw error body when present.
     case serverError(statusCode: Int, data: Data?)
     case unauthorized                      // 401
     case forbidden                         // 403
